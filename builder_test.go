@@ -197,6 +197,14 @@ func TestBuilder(t *testing.T) {
 				},
 			},
 		},
+		{
+			Dockerfile: "dockerclient/testdata/Dockerfile.shell",
+			From:       "debian",
+			Config: docker.Config{
+				Image: "debian",
+				Shell: []string{"powershell", "--"},
+			},
+		},
 	}
 	for i, test := range testCases {
 		data, err := ioutil.ReadFile(test.Dockerfile)

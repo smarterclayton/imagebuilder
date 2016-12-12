@@ -470,6 +470,25 @@ func healthcheck(b *Builder, args []string, attributes map[string]bool, flagArgs
 	return nil
 }
 
+// SHELL powershell -command
+//
+// Set the non-default shell to use.
+func shell(b *Builder, args []string, attributes map[string]bool, flagArgs []string, original string) error {
+	shellSlice := handleJSONArgs(args, attributes)
+	switch {
+	case len(shellSlice) == 0:
+		// SHELL []
+		return errAtLeastOneArgument("SHELL")
+	case attributes["json"]:
+		// SHELL ["powershell", "-command"]
+		b.RunConfig.Shell = strslice.StrSlice(shellSlice)
+	default:
+		// SHELL powershell -command - not JSON
+		return errNotJSON("SHELL", original)
+	}
+	return nil
+}
+
 // ARG name[=value]
 //
 // Adds the variable foo to the trusted list of variables that can be passed
