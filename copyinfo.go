@@ -1,4 +1,4 @@
-package dockerclient
+package imagebuilder
 
 import (
 	"fmt"
@@ -21,7 +21,7 @@ type CopyInfo struct {
 
 // CalcCopyInfo identifies the source files selected by a Dockerfile ADD or COPY instruction.
 func CalcCopyInfo(origPath, rootPath string, allowLocalDecompression, allowWildcards bool) ([]CopyInfo, error) {
-	origPath = trimLeadingPath(origPath)
+	origPath = TrimLeadingPath(origPath)
 	// Deal with wildcards
 	if allowWildcards && containsWildcards(origPath) {
 		matchPath := filepath.Join(rootPath, origPath)
@@ -40,7 +40,7 @@ func CalcCopyInfo(origPath, rootPath string, allowLocalDecompression, allowWildc
 
 			// Note we set allowWildcards to false in case the name has
 			// a * in it
-			subInfos, err := CalcCopyInfo(trimLeadingPath(strings.TrimPrefix(path, rootPath)), rootPath, allowLocalDecompression, false)
+			subInfos, err := CalcCopyInfo(TrimLeadingPath(strings.TrimPrefix(path, rootPath)), rootPath, allowLocalDecompression, false)
 			if err != nil {
 				return err
 			}
@@ -71,7 +71,7 @@ func CalcCopyInfo(origPath, rootPath string, allowLocalDecompression, allowWildc
 		return nil, err
 	}
 
-	origPath = trimTrailingDot(origPath)
+	origPath = TrimTrailingDot(origPath)
 	return []CopyInfo{{FileInfo: fi, Path: origPath, Decompress: allowLocalDecompression}}, nil
 }
 
@@ -121,7 +121,7 @@ func DownloadURL(src, dst string) ([]CopyInfo, string, error) {
 	return []CopyInfo{{FileInfo: info, Path: base}}, tmpDir, nil
 }
 
-func trimLeadingPath(origPath string) string {
+func TrimLeadingPath(origPath string) string {
 	// Work in daemon-specific OS filepath semantics
 	origPath = filepath.FromSlash(origPath)
 	if origPath != "" && origPath[0] == os.PathSeparator && len(origPath) > 1 {
@@ -131,7 +131,7 @@ func trimLeadingPath(origPath string) string {
 	return origPath
 }
 
-func trimTrailingDot(origPath string) string {
+func TrimTrailingDot(origPath string) string {
 	if strings.HasSuffix(origPath, string(os.PathSeparator)+".") {
 		return strings.TrimSuffix(origPath, ".")
 	}
@@ -151,7 +151,7 @@ func containsWildcards(name string) bool {
 	return false
 }
 
-// isURL returns true if the string appears to be a URL.
-func isURL(s string) bool {
+// IsURL returns true if the string appears to be a URL.
+func IsURL(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 }

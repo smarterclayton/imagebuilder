@@ -79,6 +79,12 @@ func (noopExecutor) UnrecognizedInstruction(step *Step) error {
 	return nil
 }
 
+// Mount represents a binding between the current system and the destination client
+type Mount struct {
+	SourcePath      string
+	DestinationPath string
+}
+
 type VolumeSet []string
 
 func (s *VolumeSet) Add(path string) bool {

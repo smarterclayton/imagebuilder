@@ -30,12 +30,6 @@ func NewClientFromEnv() (*docker.Client, error) {
 	return docker.NewClientFromEnv()
 }
 
-// Mount represents a binding between the current system and the destination client
-type Mount struct {
-	SourcePath      string
-	DestinationPath string
-}
-
 // ClientExecutor can run Docker builds from a Docker client.
 type ClientExecutor struct {
 	// Client is a client to a Docker daemon.
@@ -67,7 +61,7 @@ type ClientExecutor struct {
 	// to the inside that will not be part of the final image. Any
 	// content created inside the mount's destinationPath will be
 	// omitted from the final image.
-	TransientMounts []Mount
+	TransientMounts []imagebuilder.Mount
 
 	// The path within the container to perform the transient mount.
 	ContainerTransientMount string
@@ -139,7 +133,7 @@ func (e *ClientExecutor) Build(b *imagebuilder.Builder, node *parser.Node, from 
 	return e.Commit(b)
 }
 
-func (e *ClientExecutor) Prepare(b *imagebuilder.Builder, node *parser.Node, from string) error {
+func (e *ClientExecutor) PrepareImage(b *imagebuilder.Builder, node *parser.Node, from string) error {
 	var err error
 
 	// identify the base image
@@ -177,6 +171,26 @@ func (e *ClientExecutor) Prepare(b *imagebuilder.Builder, node *parser.Node, fro
 	b.RunConfig.Image = from
 	e.LogFn("FROM %s", from)
 	glog.V(4).Infof("step: FROM %s", from)
+	return nil
+}
+
+func (e *ClientExecutor) AllocateTemporaryVolume() (string, string, error) {
+	volumeName, err := randSeq(imageSafeCharacters, 24)
+	if err != nil {
+		return "", "", err
+	}
+	v, err := e.Client.CreateVolume(docker.CreateVolumeOptions{Name: volumeName})
+	if err != nil {
+		return "", "", fmt.Errorf("unable to create volume to mount secrets: %v", err)
+	}
+	e.Deferred = append(e.Deferred, func() error { return e.Client.RemoveVolume(volumeName) })
+	return volumeName, v.Mountpoint, nil
+}
+
+func (e *ClientExecutor) Prepare(b *imagebuilder.Builder, node *parser.Node, from string) error {
+	if err := e.PrepareImage(b, node, from); err != nil {
+		return err
+	}
 
 	b.Excludes = e.Excludes
 
@@ -199,16 +213,11 @@ func (e *ClientExecutor) Prepare(b *imagebuilder.Builder, node *parser.Node, fro
 		if mustStart {
 			// Transient mounts only make sense on images that will be running processes
 			if len(e.TransientMounts) > 0 {
-				volumeName, err := randSeq(imageSafeCharacters, 24)
+				volumeName, mountpoint, err := e.AllocateTemporaryVolume()
 				if err != nil {
 					return err
 				}
-				v, err := e.Client.CreateVolume(docker.CreateVolumeOptions{Name: volumeName})
-				if err != nil {
-					return fmt.Errorf("unable to create volume to mount secrets: %v", err)
-				}
-				e.Deferred = append(e.Deferred, func() error { return e.Client.RemoveVolume(volumeName) })
-				sharedMount = v.Mountpoint
+				sharedMount = mountpoint
 				opts.HostConfig = &docker.HostConfig{
 					Binds: []string{volumeName + ":" + e.ContainerTransientMount},
 				}
@@ -246,7 +255,7 @@ func (e *ClientExecutor) Prepare(b *imagebuilder.Builder, node *parser.Node, fro
 			return fmt.Errorf("unable to create build container: %v", err)
 		}
 		e.Container = container
-		e.Deferred = append([]func() error{func() error { return e.removeContainer(container.ID) }}, e.Deferred...)
+		e.Deferred = append([]func() error{func() error { return e.RemoveContainer(container.ID) }}, e.Deferred...)
 	}
 
 	// TODO: lazy start
@@ -354,12 +363,12 @@ func (e *ClientExecutor) Commit(b *imagebuilder.Builder) error {
 	return nil
 }
 
-func (e *ClientExecutor) PopulateTransientMounts(opts docker.CreateContainerOptions, transientMounts []Mount, sharedMount string) ([]string, error) {
+func (e *ClientExecutor) PopulateTransientMounts(opts docker.CreateContainerOptions, transientMounts []imagebuilder.Mount, sharedMount string) ([]string, error) {
 	container, err := e.Client.CreateContainer(opts)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create transient container: %v", err)
 	}
-	defer e.removeContainer(container.ID)
+	defer e.RemoveContainer(container.ID)
 
 	var copies []imagebuilder.Copy
 	for i, mount := range transientMounts {
@@ -394,7 +403,7 @@ func (e *ClientExecutor) Release() []error {
 }
 
 // removeContainer removes the provided container ID
-func (e *ClientExecutor) removeContainer(id string) error {
+func (e *ClientExecutor) RemoveContainer(id string) error {
 	e.Client.StopContainer(id, 0)
 	err := e.Client.RemoveContainer(docker.RemoveContainerOptions{
 		ID:            id,
@@ -645,13 +654,13 @@ func (c closers) Close() error {
 func (e *ClientExecutor) Archive(src, dst string, allowDecompression, allowDownload bool, excludes []string) (io.Reader, io.Closer, error) {
 	var closer closers
 	var base string
-	var infos []CopyInfo
+	var infos []imagebuilder.CopyInfo
 	var err error
-	if isURL(src) {
+	if imagebuilder.IsURL(src) {
 		if !allowDownload {
 			return nil, nil, fmt.Errorf("source can't be a URL")
 		}
-		infos, base, err = DownloadURL(src, dst)
+		infos, base, err = imagebuilder.DownloadURL(src, dst)
 		if len(base) > 0 {
 			closer = append(closer, func() error { return os.RemoveAll(base) })
 		}
@@ -665,7 +674,7 @@ func (e *ClientExecutor) Archive(src, dst string, allowDecompression, allowDownl
 		} else {
 			base = e.Directory
 		}
-		infos, err = CalcCopyInfo(src, base, allowDecompression, true)
+		infos, err = imagebuilder.CalcCopyInfo(src, base, allowDecompression, true)
 	}
 	if err != nil {
 		closer.Close()
@@ -680,8 +689,8 @@ func (e *ClientExecutor) Archive(src, dst string, allowDecompression, allowDownl
 	return rc, closer, err
 }
 
-func archiveOptionsFor(infos []CopyInfo, dst string, excludes []string) *archive.TarOptions {
-	dst = trimLeadingPath(dst)
+func archiveOptionsFor(infos []imagebuilder.CopyInfo, dst string, excludes []string) *archive.TarOptions {
+	dst = imagebuilder.TrimLeadingPath(dst)
 	patterns, patDirs, _, _ := fileutils.CleanPatterns(excludes)
 	options := &archive.TarOptions{}
 	for _, info := range infos {

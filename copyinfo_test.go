@@ -1,4 +1,4 @@
-package dockerclient
+package imagebuilder
 
 import (
 	"reflect"
