@@ -14,8 +14,6 @@ import (
 	"unsafe"
 )
 
-//go:generate go run $GOROOT/src/syscall/mksyscall_windows.go -output zsyscall_windows.go eventlog.go service.go syscall_windows.go security_windows.go
-
 type Handle uintptr
 
 const InvalidHandle = ^Handle(0)
@@ -84,6 +82,7 @@ func NewCallbackCDecl(fn interface{}) uintptr
 
 //sys	GetLastError() (lasterr error)
 //sys	LoadLibrary(libname string) (handle Handle, err error) = LoadLibraryW
+//sys	LoadLibraryEx(libname string, zero Handle, flags uintptr) (handle Handle, err error) = LoadLibraryExW
 //sys	FreeLibrary(handle Handle) (err error)
 //sys	GetProcAddress(module Handle, procname string) (proc uintptr, err error)
 //sys	GetVersion() (ver uint32, err error)
@@ -94,7 +93,8 @@ func NewCallbackCDecl(fn interface{}) uintptr
 //sys	WriteFile(handle Handle, buf []byte, done *uint32, overlapped *Overlapped) (err error)
 //sys	SetFilePointer(handle Handle, lowoffset int32, highoffsetptr *int32, whence uint32) (newlowoffset uint32, err error) [failretval==0xffffffff]
 //sys	CloseHandle(handle Handle) (err error)
-//sys	GetStdHandle(stdhandle int) (handle Handle, err error) [failretval==InvalidHandle]
+//sys	GetStdHandle(stdhandle uint32) (handle Handle, err error) [failretval==InvalidHandle]
+//sys	SetStdHandle(stdhandle uint32, handle Handle) (err error)
 //sys	findFirstFile1(name *uint16, data *win32finddata1) (handle Handle, err error) [failretval==InvalidHandle] = FindFirstFileW
 //sys	findNextFile1(handle Handle, data *win32finddata1) (err error) = FindNextFileW
 //sys	FindClose(handle Handle) (err error)
@@ -105,10 +105,12 @@ func NewCallbackCDecl(fn interface{}) uintptr
 //sys	RemoveDirectory(path *uint16) (err error) = RemoveDirectoryW
 //sys	DeleteFile(path *uint16) (err error) = DeleteFileW
 //sys	MoveFile(from *uint16, to *uint16) (err error) = MoveFileW
+//sys	MoveFileEx(from *uint16, to *uint16, flags uint32) (err error) = MoveFileExW
 //sys	GetComputerName(buf *uint16, n *uint32) (err error) = GetComputerNameW
 //sys	GetComputerNameEx(nametype uint32, buf *uint16, n *uint32) (err error) = GetComputerNameExW
 //sys	SetEndOfFile(handle Handle) (err error)
 //sys	GetSystemTimeAsFileTime(time *Filetime)
+//sys	GetSystemTimePreciseAsFileTime(time *Filetime)
 //sys	GetTimeZoneInformation(tzi *Timezoneinformation) (rc uint32, err error) [failretval==0xffffffff]
 //sys	CreateIoCompletionPort(filehandle Handle, cphandle Handle, key uint32, threadcnt uint32) (handle Handle, err error)
 //sys	GetQueuedCompletionStatus(cphandle Handle, qty *uint32, key *uint32, overlapped **Overlapped, timeout uint32) (err error)
@@ -152,6 +154,9 @@ func NewCallbackCDecl(fn interface{}) uintptr
 //sys	FlushViewOfFile(addr uintptr, length uintptr) (err error)
 //sys	VirtualLock(addr uintptr, length uintptr) (err error)
 //sys	VirtualUnlock(addr uintptr, length uintptr) (err error)
+//sys	VirtualAlloc(address uintptr, size uintptr, alloctype uint32, protect uint32) (value uintptr, err error) = kernel32.VirtualAlloc
+//sys	VirtualFree(address uintptr, size uintptr, freetype uint32) (err error) = kernel32.VirtualFree
+//sys	VirtualProtect(address uintptr, size uintptr, newprotect uint32, oldprotect *uint32) (err error) = kernel32.VirtualProtect
 //sys	TransmitFile(s Handle, handle Handle, bytesToWrite uint32, bytsPerSend uint32, overlapped *Overlapped, transmitFileBuf *TransmitFileBuffers, flags uint32) (err error) = mswsock.TransmitFile
 //sys	ReadDirectoryChanges(handle Handle, buf *byte, buflen uint32, watchSubTree bool, mask uint32, retlen *uint32, overlapped *Overlapped, completionRoutine uintptr) (err error) = kernel32.ReadDirectoryChangesW
 //sys	CertOpenSystemStore(hprov Handle, name *uint16) (store Handle, err error) = crypt32.CertOpenSystemStoreW
@@ -311,8 +316,8 @@ var (
 	Stderr = getStdHandle(STD_ERROR_HANDLE)
 )
 
-func getStdHandle(h int) (fd Handle) {
-	r, _ := GetStdHandle(h)
+func getStdHandle(stdhandle uint32) (fd Handle) {
+	r, _ := GetStdHandle(stdhandle)
 	CloseOnExec(r)
 	return r
 }
@@ -369,7 +374,7 @@ func Rename(oldpath, newpath string) (err error) {
 	if err != nil {
 		return err
 	}
-	return MoveFile(from, to)
+	return MoveFileEx(from, to, MOVEFILE_REPLACE_EXISTING)
 }
 
 func ComputerName() (name string, err error) {
@@ -484,6 +489,10 @@ func Chmod(path string, mode uint32) (err error) {
 	return SetFileAttributes(p, attrs)
 }
 
+func LoadGetSystemTimePreciseAsFileTime() error {
+	return procGetSystemTimePreciseAsFileTime.Find()
+}
+
 func LoadCancelIoEx() error {
 	return procCancelIoEx.Find()
 }
@@ -528,6 +537,9 @@ const socket_error = uintptr(^uint32(0))
 //sys	GetAdaptersInfo(ai *IpAdapterInfo, ol *uint32) (errcode error) = iphlpapi.GetAdaptersInfo
 //sys	SetFileCompletionNotificationModes(handle Handle, flags uint8) (err error) = kernel32.SetFileCompletionNotificationModes
 //sys	WSAEnumProtocols(protocols *int32, protocolBuffer *WSAProtocolInfo, bufferLength *uint32) (n int32, err error) [failretval==-1] = ws2_32.WSAEnumProtocolsW
+//sys	GetAdaptersAddresses(family uint32, flags uint32, reserved uintptr, adapterAddresses *IpAdapterAddresses, sizePointer *uint32) (errcode error) = iphlpapi.GetAdaptersAddresses
+//sys	GetACP() (acp uint32) = kernel32.GetACP
+//sys	MultiByteToWideChar(codePage uint32, dwFlags uint32, str *byte, nstr int32, wchar *uint16, nwchar int32) (nwrite int32, err error) = kernel32.MultiByteToWideChar
 
 // For testing: clients can set this flag to force
 // creation of IPv6 sockets to return EAFNOSUPPORT.

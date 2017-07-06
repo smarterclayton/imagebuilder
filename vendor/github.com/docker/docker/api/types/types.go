@@ -17,6 +17,38 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
+// ContainerChange contains response of Engine API:
+// GET "/containers/{name:.*}/changes"
+type ContainerChange struct {
+	Kind int
+	Path string
+}
+
+// ImageHistory contains response of Engine API:
+// GET "/images/{name:.*}/history"
+type ImageHistory struct {
+	ID        string `json:"Id"`
+	Created   int64
+	CreatedBy string
+	Tags      []string
+	Size      int64
+	Comment   string
+}
+
+// ImageDelete contains response of Engine API:
+// DELETE "/images/{name:.*}"
+type ImageDelete struct {
+	Untagged string `json:",omitempty"`
+	Deleted  string `json:",omitempty"`
+}
+
+// GraphDriverData returns Image's graph driver config info
+// when calling inspect command
+type GraphDriverData struct {
+	Name string
+	Data map[string]string
+}
+
 // RootFS returns Image's RootFS description including the layer IDs.
 type RootFS struct {
 	Type      string
@@ -93,6 +125,13 @@ type ContainerStats struct {
 	OSType string        `json:"ostype"`
 }
 
+// ContainerProcessList contains response of Engine API:
+// GET "/containers/{name:.*}/top"
+type ContainerProcessList struct {
+	Processes [][]string
+	Titles    []string
+}
+
 // Ping contains response of Engine API:
 // GET "/_ping"
 type Ping struct {
@@ -115,11 +154,11 @@ type Version struct {
 	BuildTime     string `json:",omitempty"`
 }
 
-// Commit holds the Git-commit (SHA1) that a binary was built from, as reported
-// in the version-string of external tools, such as containerd, or runC.
+// Commit records a external tool actual commit id version along the
+// one expect by dockerd as set at build time
 type Commit struct {
-	ID       string // ID is the actual commit ID of external tool.
-	Expected string // Expected is the commit ID of external tool expected by dockerd as set at build time.
+	ID       string
+	Expected string
 }
 
 // Info contains response of Engine API:
@@ -416,13 +455,6 @@ type EndpointResource struct {
 
 // NetworkCreate is the expected body of the "create network" http request message
 type NetworkCreate struct {
-	// Check for networks with duplicate names.
-	// Network is primarily keyed based on a random ID and not on the name.
-	// Network name is strictly a user-friendly alias to the network
-	// which is uniquely identified using ID.
-	// And there is no guaranteed way to check for duplicates.
-	// Option CheckDuplicate is there to provide a best effort checking of any networks
-	// which has the same name but it is not guaranteed to catch all name collisions.
 	CheckDuplicate bool
 	Driver         string
 	EnableIPv6     bool
@@ -494,7 +526,7 @@ type VolumesPruneReport struct {
 // ImagesPruneReport contains the response for Engine API:
 // POST "/images/prune"
 type ImagesPruneReport struct {
-	ImagesDeleted  []ImageDeleteResponseItem
+	ImagesDeleted  []ImageDelete
 	SpaceReclaimed uint64
 }
 
@@ -514,13 +546,4 @@ type SecretCreateResponse struct {
 // SecretListOptions holds parameters to list secrets
 type SecretListOptions struct {
 	Filters filters.Args
-}
-
-// PushResult contains the tag, manifest digest, and manifest size from the
-// push. It's used to signal this information to the trust code in the client
-// so it can sign the manifest if necessary.
-type PushResult struct {
-	Tag    string
-	Digest string
-	Size   int
 }
